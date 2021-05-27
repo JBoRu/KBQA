@@ -6,6 +6,8 @@ import torch.nn as nn
 import time
 import numpy as np
 from NSM.Modules.Instruction.base_instruction import BaseInstruction
+from transformers import AutoTokenizer
+from transformers import BertModel as PretrainedBert
 VERY_SMALL_NUMBER = 1e-10
 VERY_NEG_NUMBER = -100000000000
 
@@ -72,6 +74,96 @@ class LSTMInstruction(BaseInstruction):
 
     def forward(self, query_text):
         self.init_reason(query_text)
+        for i in range(self.num_step):
+            relational_ins, attn_weight = self.get_instruction(self.relational_ins, step=i)
+            self.instructions.append(relational_ins)
+            self.attn_list.append(attn_weight)
+            self.relational_ins = relational_ins
+        return self.instructions, self.attn_list
+
+    # def __repr__(self):
+    #     return "LSTM + token-level attention"
+
+class LSTMInstructionWithLMEncodeQuestion(BaseInstruction):
+
+    def __init__(self, args, word_embedding, num_word):
+        super(LSTMInstructionWithLMEncodeQuestion, self).__init__(args)
+        self.word_embedding = word_embedding
+        self.num_word = num_word
+        self.encoder_def()
+        self.pretrained_bert_def()
+        entity_dim = self.entity_dim
+        self.cq_linear = nn.Linear(in_features=2 * entity_dim, out_features=entity_dim)
+        self.ca_linear = nn.Linear(in_features=entity_dim, out_features=1)
+        for i in range(self.num_step):
+            self.add_module('question_linear' + str(i), nn.Linear(in_features=entity_dim, out_features=entity_dim))
+
+    def pretrained_bert_def(self):
+        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+        self.pretrained_bert = PretrainedBert.from_pretrained('bert-base-uncased')
+        # fix the pretrained bert model
+        for p in self.pretrained_bert.parameters():
+            p.requires_grad = False
+
+    def encoder_def(self):
+        # initialize entity embedding
+        word_dim = self.word_dim
+        kg_dim = self.kg_dim
+        kge_dim = self.kge_dim
+        entity_dim = self.entity_dim
+        self.node_encoder = nn.LSTM(input_size=word_dim, hidden_size=entity_dim,
+                                    batch_first=True, bidirectional=False)
+
+    def encode_question(self, query_str_list):
+        batch_size = len(query_str_list)
+        self.query_mask, self.hidden_states = self.encode_question_with_lm(query_str_list)
+        query_word_emb = self.hidden_states
+        # 1, batch_size, entity_dim
+        query_hidden_emb, (h_n, c_n) = self.node_encoder(self.lstm_drop(query_word_emb),
+                                                         self.init_hidden(1, batch_size,self.entity_dim))
+        self.instruction_hidden = h_n
+        self.instruction_mem = c_n
+        self.query_node_emb = h_n.squeeze(dim=0).unsqueeze(dim=1)  # batch_size, 1, entity_dim
+        self.query_hidden_emb = query_hidden_emb
+        return query_hidden_emb, self.query_node_emb
+
+    def encode_question_with_lm(self, query_str_list):
+        encoded_input = self.tokenizer(text=query_str_list, padding=True, return_tensors="pt")
+        sequence_ids = encoded_input["input_ids"].to(self.device)
+        token_type_ids = encoded_input["token_type_ids"].to(self.device)
+        sequence_mask = encoded_input["attention_mask"].to(self.device)
+        outputs = self.pretrained_bert(input_ids=sequence_ids, attention_mask=sequence_mask, token_type_ids=token_type_ids)
+        sequence_mask = sequence_mask
+        last_hidden_state = outputs.last_hidden_state
+        return sequence_mask, last_hidden_state
+
+    def init_reason(self, query_str_list):
+        batch_size = len(query_str_list)
+        self.encode_question(query_str_list)
+        self.relational_ins = torch.zeros(batch_size, self.entity_dim).to(self.device)
+        self.instructions = []
+        self.attn_list = []
+
+    def get_instruction(self, relational_ins, step=0, query_node_emb=None):
+        query_hidden_emb = self.query_hidden_emb
+        query_mask = self.query_mask
+        if query_node_emb is None:
+            query_node_emb = self.query_node_emb
+        relational_ins = relational_ins.unsqueeze(1)
+        question_linear = getattr(self, 'question_linear' + str(step))
+        q_i = question_linear(self.linear_drop(query_node_emb))
+        cq = self.cq_linear(self.linear_drop(torch.cat((relational_ins, q_i), dim=-1)))
+        # batch_size, 1, entity_dim
+        ca = self.ca_linear(self.linear_drop(cq * query_hidden_emb))
+        # batch_size, max_local_entity, 1
+        # cv = self.softmax_d1(ca + (1 - query_mask.unsqueeze(2)) * VERY_NEG_NUMBER)
+        attn_weight = F.softmax(ca + (1 - query_mask.unsqueeze(2)) * VERY_NEG_NUMBER, dim=1)
+        # batch_size, max_local_entity, 1
+        relational_ins = torch.sum(attn_weight * query_hidden_emb, dim=1)
+        return relational_ins, attn_weight
+
+    def forward(self, query_str_list):
+        self.init_reason(query_str_list)
         for i in range(self.num_step):
             relational_ins, attn_weight = self.get_instruction(self.relational_ins, step=i)
             self.instructions.append(relational_ins)

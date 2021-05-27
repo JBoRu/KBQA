@@ -14,7 +14,7 @@ def load_dict(filename):
     return word2id
 
 
-def load_data(config):
+def load_data(config, logger):
     entity2id = load_dict(config['data_folder'] + config['entity2id'])
     word2id = load_dict(config['data_folder'] + config['word2id'])
     relation2id = load_dict(config['data_folder'] + config['relation2id'])
@@ -22,9 +22,9 @@ def load_data(config):
         train_data = None
         valid_data = None
     else:
-        train_data = SingleDataLoader(config, word2id, relation2id, entity2id, data_type="train")
-        valid_data = SingleDataLoader(config, word2id, relation2id, entity2id, data_type="dev")
-    test_data = SingleDataLoader(config, word2id, relation2id, entity2id, data_type="test")
+        train_data = SingleDataLoader(config, word2id, relation2id, entity2id, logger, data_type="train")
+        valid_data = SingleDataLoader(config, word2id, relation2id, entity2id, logger, data_type="dev")
+    test_data = SingleDataLoader(config, word2id, relation2id, entity2id, logger, data_type="test")
     dataset = {
         "train": train_data,
         "valid": valid_data,

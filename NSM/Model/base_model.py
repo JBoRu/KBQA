@@ -46,6 +46,7 @@ class BaseModel(torch.nn.Module):
 
     def __init__(self, args, num_entity, num_relation, num_word):
         super(BaseModel, self).__init__()
+        self.args = args
         self.num_relation = num_relation
         self.num_entity = num_entity
         self.num_word = num_word
@@ -137,6 +138,7 @@ class BaseModel(torch.nn.Module):
         word_dim = self.word_dim
         kge_dim = self.kge_dim
         kg_dim = self.kg_dim
+        entity_dim = self.entity_dim
         num_entity = self.num_entity
         num_relation = self.num_relation
         num_word = self.num_word
@@ -175,14 +177,17 @@ class BaseModel(torch.nn.Module):
             self.relation_kge = None
 
         # initialize text embeddings
-        self.word_embedding = nn.Embedding(num_embeddings=num_word + 1, embedding_dim=word_dim,
-                                           padding_idx=num_word)
-        if self.word_emb_file is not None:
-            self.word_embedding.weight = nn.Parameter(
-                torch.from_numpy(
-                    np.pad(np.load(self.word_emb_file), ((0, 1), (0, 0)), 'constant')).type(
-                    'torch.FloatTensor'))
-            self.word_embedding.weight.requires_grad = False
+        if self.args['use_LM_encode_question']:
+            self.word_embedding = None
+        else:
+            self.word_embedding = nn.Embedding(num_embeddings=num_word + 1, embedding_dim=word_dim,
+                                               padding_idx=num_word)
+            if self.word_emb_file is not None:
+                self.word_embedding.weight = nn.Parameter(
+                    torch.from_numpy(
+                        np.pad(np.load(self.word_emb_file), ((0, 1), (0, 0)), 'constant')).type(
+                        'torch.FloatTensor'))
+                self.word_embedding.weight.requires_grad = False
 
     def load_relation_file(self, filename):
         half_tensor = np.load(filename)

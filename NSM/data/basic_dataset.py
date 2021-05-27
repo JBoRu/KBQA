@@ -17,7 +17,8 @@ def load_dict(filename):
 
 
 class BasicDataLoader(object):
-    def __init__(self, config, word2id, relation2id, entity2id, data_type="train"):
+    def __init__(self, config, word2id, relation2id, entity2id, logger, data_type="train"):
+        self.logger = logger
         self._parse_args(config, word2id, relation2id, entity2id)
         self._load_file(config, data_type)
         self._load_data()
@@ -25,7 +26,7 @@ class BasicDataLoader(object):
     def _load_file(self, config, data_type="train"):
         data_file = config['data_folder'] + data_type + "_simple.json"
         dep_file = config['data_folder'] + data_type + ".dep"
-        print('loading data from', data_file)
+        self.logger.info('loading data from {}'.format(data_file))
         self.data = []
         self.dep = []
         skip_index = set()
@@ -42,7 +43,7 @@ class BasicDataLoader(object):
                 if config["debug"]:
                     if index > 1000:
                         break
-        print("skip", skip_index)
+        self.logger.info("skip: "+str(skip_index))
         index = 0
         with open(dep_file) as f_in:
             for line in f_in:
@@ -54,12 +55,12 @@ class BasicDataLoader(object):
                 if config["debug"]:
                     if index > 1000:
                         break
-        print('max_facts: ', self.max_facts)
+        self.logger.info('max_facts: '+str(self.max_facts))
         self.num_data = len(self.data)
         self.batches = np.arange(self.num_data)
 
     def _load_data(self):
-        print('converting global to local entity index ...')
+        self.logger.info('converting global to local entity index ...')
         self.global2local_entity_maps = self._build_global2local_entity_maps()
 
         if self.use_self_loop:
@@ -76,14 +77,15 @@ class BasicDataLoader(object):
         # self.query_texts = np.full((self.num_data, self.max_query_word), len(self.word2id), dtype=int)
         self.answer_dists = np.zeros((self.num_data, self.max_local_entity), dtype=float)
         self.answer_lists = np.empty(self.num_data, dtype=object)
+        self.query_string_lists = np.empty(self.num_data, dtype=object)
 
         if self.q_type == "con":
-            print('preparing con ...')
+            self.logger.info('preparing con ...')
             self._prepare_con()
         else:
-            print('preparing dep ...')
+            self.logger.info('preparing dep ...')
             self._prepare_dep()
-        print('preparing data ...')
+        self.logger.info('preparing data ...')
         self._prepare_data()
 
     def _parse_args(self, config, word2id, relation2id, entity2id):
@@ -94,7 +96,7 @@ class BasicDataLoader(object):
         self.max_relevant_doc = 0
         self.max_facts = 0
 
-        print('building word index ...')
+        self.logger.info('building word index ...')
         self.word2id = word2id
         self.id2word = {i: word for word, i in word2id.items()}
         self.relation2id = relation2id
@@ -108,7 +110,7 @@ class BasicDataLoader(object):
             self.num_kb_relation = len(relation2id)
         if self.use_self_loop:
             self.num_kb_relation = self.num_kb_relation + 1
-        print("Entity: {}, Relation in KB: {}, Relation in use: {} ".format(len(entity2id),
+        self.logger.info("Entity: {}, Relation in KB: {}, Relation in use: {} ".format(len(entity2id),
                                                                             len(self.relation2id),
                                                                             self.num_kb_relation))
 
@@ -163,11 +165,13 @@ class BasicDataLoader(object):
         self.dep_relations = []
         for sample in tqdm(self.dep):
             tp_dep = sample["dep"]
-            node_layer, parents, relations = read_tree(tp_dep)
+            question = sample["question"]
+            self.query_string_lists[next_id] = question
+            # node_layer, parents, relations = read_tree(tp_dep)
             # self.layer2node.append(layer2node)
-            self.node2layer.append(node_layer)
-            self.dep_parents.append(parents)
-            self.dep_relations.append(relations)
+            # self.node2layer.append(node_layer)
+            # self.dep_parents.append(parents)
+            # self.dep_relations.append(relations)
             tokens = [item[0] for item in tp_dep]
             for j, word in enumerate(tokens):
                 # if j < self.max_query_word:
@@ -286,7 +290,7 @@ class BasicDataLoader(object):
                 num_no_query_ent += 1
             else:
                 num_multiple_ent += 1
-        print("{} cases in total, {} cases without query entity, {} cases with single query entity,"
+        self.logger.info("{} cases in total, {} cases without query entity, {} cases with single query entity,"
               " {} cases with multiple query entities".format(next_id, num_no_query_ent,
                                                               num_one_query_ent, num_multiple_ent))
 
@@ -362,13 +366,18 @@ class BasicDataLoader(object):
         for i, sample_id in enumerate(sample_ids):
             index_bias = i * self.max_local_entity
             head_list, rel_list, tail_list = self.kb_adj_mats[sample_id]
-            num_fact = len(head_list)
-            num_keep_fact = int(np.floor(num_fact * (1 - fact_dropout)))
-            mask_index = np.random.permutation(num_fact)[: num_keep_fact]
-
-            real_head_list = head_list[mask_index] + index_bias
-            real_tail_list = tail_list[mask_index] + index_bias
-            real_rel_list = rel_list[mask_index]
+            if fact_dropout > 0:
+                num_fact = len(head_list)
+                num_keep_fact = int(np.floor(num_fact * (1 - fact_dropout)))
+                mask_index = np.random.permutation(num_fact)[: num_keep_fact]
+                real_head_list = head_list[mask_index] + index_bias
+                real_tail_list = tail_list[mask_index] + index_bias
+                real_rel_list = rel_list[mask_index]
+            else:
+                real_head_list = head_list + index_bias
+                real_tail_list = tail_list + index_bias
+                real_rel_list = rel_list
+                mask_index = head_list
             batch_heads = np.append(batch_heads, real_head_list)
             batch_rels = np.append(batch_rels, real_rel_list)
             batch_tails = np.append(batch_tails, real_tail_list)
@@ -382,9 +391,10 @@ class BasicDataLoader(object):
                 batch_rels = np.append(batch_rels, rel_array)
                 batch_ids = np.append(batch_ids, np.full(num_ent_now, i, dtype=int))
         fact_ids = np.array(range(len(batch_heads)), dtype=int)
-        head_count = Counter(batch_heads)
+        # head_count = Counter(batch_heads)
         # tail_count = Counter(batch_tails)
-        weight_list = [1.0 / head_count[head] for head in batch_heads]
+        # weight_list = [1.0 / head_count[head] for head in batch_heads]
+        weight_list = [1] * len(batch_heads)
         # entity2fact_index = torch.LongTensor([batch_heads, fact_ids])
         # entity2fact_val = torch.FloatTensor(weight_list)
         # entity2fact_mat = torch.sparse.FloatTensor(entity2fact_index, entity2fact_val, torch.Size(
@@ -412,8 +422,8 @@ class BasicDataLoader(object):
             total_local_entity += len(g2l)
             self.max_local_entity = max(self.max_local_entity, len(g2l))
             next_id += 1
-        print('avg local entity: ', total_local_entity / next_id)
-        print('max local entity: ', self.max_local_entity)
+        self.logger.info('avg local entity: '+str(total_local_entity / next_id))
+        self.logger.info('max local entity: '+str(self.max_local_entity))
         return global2local_entity_maps
 
     @staticmethod

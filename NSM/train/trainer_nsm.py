@@ -100,7 +100,7 @@ class Trainer_KBQA(object):
             self.scheduler = None
 
     def load_data(self, args):
-        dataset = load_data(args)
+        dataset = load_data(args,self.logger)
         self.train_data = dataset["train"]
         self.valid_data = dataset["valid"]
         self.test_data = dataset["test"]

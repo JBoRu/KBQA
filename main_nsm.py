@@ -97,6 +97,10 @@ parser.add_argument('--pretrain', action='store_true')
 parser.add_argument('--debug', action='store_true', default=False)
 parser.add_argument('--tb_record', action='store_true',
                     help="Whether use tensorboard to record training process")
+parser.add_argument('--use_LM_encode_question', action='store_true',
+                    help='use pretrained LM to encode question first, get cls and tokens representation')
+parser.add_argument('--instruction_model', default="lstm", type=str,
+                    help='the method of modeling instruction')
 
 args = parser.parse_args()
 args.use_cuda = torch.cuda.is_available()

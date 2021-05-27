@@ -133,7 +133,7 @@ class Evaluator_nsm:
                 loss, extras, pred_dist, tp_list = self.student(batch[:-1])
                 pred = torch.max(pred_dist, dim=1)[1]
             local_entity, query_entities, kb_adj_mat, query_text, \
-            seed_dist, true_batch_id, answer_dist, answer_list = batch
+            seed_dist, true_batch_id, answer_dist, query_string_list, answer_list = batch
             # self.true_batch_id = true_batch_id
             if write_info:
                 obj_list = self.write_info(valid_data, tp_list)

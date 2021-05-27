@@ -4,7 +4,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import torch.nn as nn
 from NSM.Model.base_model import BaseModel
-from NSM.Modules.Instruction.seq_instruction import LSTMInstruction
+from NSM.Modules.Instruction.seq_instruction import LSTMInstruction,LSTMInstructionWithLMEncodeQuestion
 from NSM.Modules.Reasoning.gnn_reasoning import GNNReasoning
 
 VERY_SMALL_NUMBER = 1e-10
@@ -33,12 +33,19 @@ class GNNModel(BaseModel):
         kge_dim = self.kge_dim
         entity_dim = self.entity_dim
         self.reasoning = GNNReasoning(args, num_entity, num_relation)
-        self.instruction = LSTMInstruction(args, self.word_embedding, self.num_word)
+        if self.args['instruction_model'] == "lstm":
+            if self.args['use_LM_encode_question']:
+                self.instruction = LSTMInstructionWithLMEncodeQuestion(args, self.word_embedding, self.num_word)
+            else:
+                self.instruction = LSTMInstruction(args, self.word_embedding, self.num_word)
 
-    def init_reason(self, curr_dist, local_entity, kb_adj_mat, q_input):
+    def init_reason(self, curr_dist, local_entity, kb_adj_mat, q_input, q_str_list):
         # batch_size = local_entity.size(0)
         self.local_entity = local_entity
-        self.instruction_list, self.attn_list = self.instruction(q_input)
+        if self.args['use_LM_encode_question']:
+            self.instruction_list, self.attn_list = self.instruction(q_str_list)
+        else:
+            self.instruction_list, self.attn_list = self.instruction(q_input)
         self.rel_features = self.get_rel_feature()
         self.local_entity_emb = self.get_ent_init(local_entity, kb_adj_mat, self.rel_features)
         self.curr_dist = curr_dist
@@ -109,9 +116,9 @@ class GNNModel(BaseModel):
 
     def forward(self, batch, training=False):
         current_dist, q_input, query_mask, kb_adj_mat, answer_dist, \
-        local_entity, query_entities, true_batch_id = batch
+        local_entity, query_entities, true_batch_id, query_string_lists = batch
         self.init_reason(curr_dist=current_dist, local_entity=local_entity,
-                         kb_adj_mat=kb_adj_mat, q_input=q_input)
+                         kb_adj_mat=kb_adj_mat, q_input=q_input, q_str_list=query_string_lists)
         for i in range(self.num_step):
             self.one_step(num_step=i)
         pred_dist = self.dist_history[-1]
