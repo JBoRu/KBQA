@@ -1,20 +1,16 @@
 import argparse
 import sys
 from NSM.train.trainer_nsm import Trainer_KBQA
-from NSM.util.utils import create_logger
+from NSM.util.utils import create_logger, init_seed, create_tensorboard
 import time
 import torch
-import numpy as np
 import os
-import datetime
-import copy
 
 parser = argparse.ArgumentParser()
-
 # datasets
 parser.add_argument('--name', default='webqsp', type=str)
-parser.add_argument('--model_name', default='rw', type=str)
-parser.add_argument('--data_folder', default='datasets/webqsp/kb_03/', type=str)
+parser.add_argument('--model_name', default=None, type=str)
+parser.add_argument('--data_folder', default=None, type=str)
 
 # embeddings
 parser.add_argument('--word2id', default='vocab_new.txt', type=str)
@@ -88,11 +84,23 @@ parser.add_argument('--label_f1', default=0.5, type=float)
 parser.add_argument('--loss_type', default='kl', type=str)
 parser.add_argument('--label_file', default=None, type=str)
 
+# New add
+parser.add_argument('--finetune', action='store_true')
+parser.add_argument('--scheduler_method', default=None, type=str,
+                    help="the scheduler method used for optimizer which can be 'ExponentialLR', 'ReduceLROnPlateau'"
+                         ", 'LinearWarmUp', 'CosineWarmUp'")
+parser.add_argument('--optim', default='Adam', type=str)
+parser.add_argument('--initialize_method', default="normal", type=str,
+                    help="the initialize method which can be 'normal', 'xavier_uniform'")
+parser.add_argument('--weight_decay', default=0.01, type=float)
+parser.add_argument('--pretrain', action='store_true')
+parser.add_argument('--debug', action='store_true', default=False)
+parser.add_argument('--tb_record', action='store_true',
+                    help="Whether use tensorboard to record training process")
+
 args = parser.parse_args()
 args.use_cuda = torch.cuda.is_available()
 
-np.random.seed(args.seed)
-torch.manual_seed(args.seed)
 if args.experiment_name == None:
     timestamp = str(int(time.time()))
     args.experiment_name = "{}-{}-{}".format(
@@ -103,17 +111,30 @@ if args.experiment_name == None:
 
 
 def main():
+    init_seed(args.seed)
     if not os.path.exists(args.checkpoint_dir):
         os.mkdir(args.checkpoint_dir)
     logger = create_logger(args)
+    tensorboard = None
+    if args.tb_record:
+        tensorboard = create_tensorboard(args)
     trainer = Trainer_KBQA(args=vars(args), logger=logger)
-    if not args.is_eval:
-        trainer.train(0, args.num_epoch - 1)
+
+    if args.pretrain:
+        logger.info("Start pretrain!")
+        trainer.pretrain(trainer.start_epoch, args.num_epoch - 1, tensorboard)
+    elif args.finetune:
+        logger.info("Start finetune!")
+        trainer.finetune(trainer.start_epoch, args.num_epoch - 1, tensorboard)
+    elif not args.is_eval:
+        logger.info("Start train!")
+        trainer.train(trainer.start_epoch, args.num_epoch - 1, tensorboard)
     else:
         assert args.load_experiment is not None
+        logger.info("Start test!")
         if args.load_experiment is not None:
             ckpt_path = os.path.join(args.checkpoint_dir, args.load_experiment)
-            print("Loading pre trained model from {}".format(ckpt_path))
+            logger.info("Loading pre trained model from {}".format(ckpt_path))
         else:
             ckpt_path = None
         trainer.evaluate_single(ckpt_path)

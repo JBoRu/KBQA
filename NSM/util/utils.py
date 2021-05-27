@@ -1,6 +1,9 @@
 import logging
 import os
-
+import numpy as np
+import torch
+import random
+from torch.utils.tensorboard import SummaryWriter
 
 def create_logger(args):
     log_file = os.path.join(args.checkpoint_dir, args.experiment_name + ".log")
@@ -8,7 +11,7 @@ def create_logger(args):
     log_level = logging.DEBUG if args.log_level == "debug" else logging.INFO
     logger.setLevel(level=log_level)
     # Formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     # FileHandler
     file_handler = logging.FileHandler(log_file)
     file_handler.setFormatter(formatter)
@@ -34,3 +37,20 @@ def get_dict(data_folder, filename):
             word = line.strip()
             word2id[word] = len(word2id)
     return word2id
+
+def init_seed(seed):
+    r""" init random seed for random functions in numpy, torch, cuda and cudnn
+    """
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
+def create_tensorboard(args):
+    # create a summary writer using the specified folder name.
+    name = args.experiment_name
+    writer = SummaryWriter(comment=name)
+    return writer

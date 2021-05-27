@@ -6,7 +6,6 @@ import time
 import numpy as np
 from NSM.Agent.BaseAgent import BaseAgent
 from NSM.Model.nsm_model import GNNModel
-from NSM.Model.backward_model import BackwardReasonModel
 VERY_SMALL_NUMBER = 1e-10
 VERY_NEG_NUMBER = -100000000000
 
@@ -20,8 +19,6 @@ class NsmAgent(BaseAgent):
         self.model_name = model_name
         if model_name.startswith('gnn'):
             self.model = GNNModel(args, num_entity, num_relation, num_word)
-        elif model_name.startswith('back'):
-            self.model = BackwardReasonModel(args, num_entity, num_relation, num_word)
         else:
             raise NotImplementedError
 

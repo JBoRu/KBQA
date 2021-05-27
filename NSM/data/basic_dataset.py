@@ -39,6 +39,9 @@ class BasicDataLoader(object):
                     continue
                 self.data.append(line)
                 self.max_facts = max(self.max_facts, 2 * len(line['subgraph']['tuples']))
+                if config["debug"]:
+                    if index > 1000:
+                        break
         print("skip", skip_index)
         index = 0
         with open(dep_file) as f_in:
@@ -48,6 +51,9 @@ class BasicDataLoader(object):
                     continue
                 line = json.loads(line)
                 self.dep.append(line)
+                if config["debug"]:
+                    if index > 1000:
+                        break
         print('max_facts: ', self.max_facts)
         self.num_data = len(self.data)
         self.batches = np.arange(self.num_data)

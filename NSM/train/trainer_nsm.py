@@ -1,17 +1,20 @@
 import torch
-import torch.nn as nn
-from torch.autograd import Variable
-import torch.nn.functional as F
 import time
 import numpy as np
 import os, math
 from NSM.train.init import init_nsm
 from NSM.train.evaluate_nsm import Evaluator_nsm
 from NSM.data.load_data_super import load_data
-from torch.optim.lr_scheduler import ExponentialLR
+from torch.optim.lr_scheduler import ExponentialLR, ReduceLROnPlateau
+import torch.nn as nn
+from transformers import AdamW, get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 from tqdm import tqdm
+from functools import reduce
+from NSM.Agent.NSMAgent import NsmAgent
 import torch.optim as optim
+import torch.nn.init as init
 tqdm.monitor_iterval = 0
+
 
 
 class Trainer_KBQA(object):
@@ -20,37 +23,81 @@ class Trainer_KBQA(object):
         self.logger = logger
         self.best_dev_performance = 0.0
         self.best_h1 = 0.0
-        self.best_f1 = 0.0
-        self.eps = args['eps']
-        self.learning_rate = self.args['lr']
-        self.test_batch_size = args['test_batch_size']
-        self.device = torch.device('cuda' if args['use_cuda'] else 'cpu')
-        self.train_kl = args['train_KL']
-        self.num_step = args['num_step']
-        self.use_label = args['use_label']
         self.reset_time = 0
+        self.start_epoch = 0
+        self.parse_args()
         self.load_data(args)
-        if 'decay_rate' in args:
-            self.decay_rate = args['decay_rate']
-        else:
-            self.decay_rate = 0.98
-        # self.mode = args['mode']
-        # self.use_middle = args['use_middle']
-        self.mode = "teacher"
-        self.model_name = self.args['model_name']
-        self.student = init_nsm(self.args, self.logger, len(self.entity2id), self.num_kb_relation,
-                                  len(self.word2id))
-        self.student.to(self.device)
+        self.init_model_and_load_ckpt(self.args)
         self.evaluator = Evaluator_nsm(args=args, student=self.student, entity2id=self.entity2id,
                                        relation2id=self.relation2id, device=self.device)
-        self.load_pretrain()
+
+    def parse_args(self):
+        self.scheduler_method = self.args["scheduler_method"]
+        self.optim = self.args["optim"]
+        self.init_method = self.args["initialize_method"]
+        self.learning_rate = self.args['lr']
+        self.weight_decay = self.args['weight_decay']
+        self.test_batch_size = self.args['test_batch_size']
+        self.pretrain_flag = self.args["pretrain"]
+        self.device = torch.device('cuda' if self.args['use_cuda'] else 'cpu')
+        self.decay_rate = self.args['decay_rate']
+        self.mode = self.args["mode"]
+        self.model_name = self.args['model_name']
+
+    def init_model_and_load_ckpt(self, args):
+        self.logger.info("Building {}.".format("Agent"))
+        self.student = NsmAgent(self.args, self.logger, len(self.entity2id), self.num_kb_relation, len(self.word2id))
+        self.logger.info("Architecture: {}".format(self.student))
+
+        self.student.to(self.device)
         self.optim_def()
+        self.scheduler_def()
+
+        self.logger.info("Optimizer: %s LR: %.5f Scheduler %s InitMethod: %s" % (self.optim, self.learning_rate,
+                                                                                 self.scheduler_method,
+                                                                                 self.init_method))
+        total_params = sum([reduce(lambda x, y: x * y, w.size(), 1.0) if w.requires_grad is True else 0
+                            for w in self.student.parameters()])
+        self.logger.info("Agent trainable params: {}".format(total_params))
 
     def optim_def(self):
-        trainable = filter(lambda p: p.requires_grad, self.student.parameters())
-        self.optim_student = optim.Adam(trainable, lr=self.learning_rate)
-        if self.decay_rate > 0:
+        if self.optim == "AdamW":
+            no_decay = ['bias', 'LayerNorm.weight']
+            optimizer_grouped_parameters = [
+                {'params': [p for n, p in self.student.named_parameters() if
+                            p.requires_grad and not any(nd in n for nd in no_decay)],
+                 'weight_decay': self.weight_decay},
+                {'params': [p for n, p in self.student.named_parameters() if
+                            p.requires_grad and any(nd in n for nd in no_decay)],
+                 'weight_decay': 0.0}
+            ]
+            self.optim_student = AdamW(optimizer_grouped_parameters, lr=self.learning_rate)
+        elif self.optim == "Adam":
+            trainable = filter(lambda p: p.requires_grad, self.student.parameters())
+            self.optim_student = optim.Adam(trainable, lr=self.learning_rate)
+
+    def scheduler_def(self):
+        if self.scheduler_method == "ExponentialLR":
+            assert self.decay_rate > 0, "Decay rate must > 0"
             self.scheduler = ExponentialLR(self.optim_student, self.decay_rate)
+        # elif self.scheduler_method == "LambdaLR":
+        elif self.scheduler_method == "ReduceLROnPlateau":
+            assert self.args["linear_decay"] > 0, "Linear decay must > 0"
+            self.scheduler = ReduceLROnPlateau(self.optim_student, mode="max", factor=self.args["linear_decay"],
+                                               patience=self.args["patience"], min_lr=self.args["min_lr"],
+                                               verbose=True)
+        elif self.scheduler_method == "LinearWarmUp":
+            assert self.args["warm_up_steps"] > 0, "WarmUp steps must > 0"
+            warm_up_steps = self.args["warm_up_steps"]
+            total_steps = self.args["num_epoch"] * math.ceil(self.train_data.num_data / self.args["batch_size"])
+            self.scheduler = get_linear_schedule_with_warmup(self.optim_student, warm_up_steps, total_steps)
+        elif self.scheduler_method == "CosineWarmUp":
+            assert self.args["warm_up_steps"] > 0, "WarmUp steps must > 0"
+            warm_up_steps = self.args["warm_up_steps"]
+            total_steps = self.args["num_epoch"] * math.ceil(self.train_data.num_data / self.args["batch_size"])
+            self.scheduler = get_cosine_schedule_with_warmup(self.optim_student, warm_up_steps, total_steps)
+        else:
+            self.scheduler = None
 
     def load_data(self, args):
         dataset = load_data(args)
@@ -73,12 +120,12 @@ class Trainer_KBQA(object):
     def evaluate(self, data, test_batch_size=20, mode="teacher", write_info=False):
         return self.evaluator.evaluate(data, test_batch_size, write_info)
 
-    def train(self, start_epoch, end_epoch):
-        # self.load_pretrain()
+    def train(self, start_epoch, end_epoch, tensorboard=None):
         eval_every = self.args['eval_every']
-        # eval_acc = inference(self.model, self.valid_data, self.entity2id, self.args)
-        self.evaluate(self.valid_data, self.test_batch_size, mode="teacher")
-        print("Strat Training------------------")
+        f1, hits1 = self.evaluate(self.valid_data, self.test_batch_size, mode="teacher")
+        self.logger.info("Before training: H1 : {:.4f}".format(hits1))
+        self.logger.info("Strat Training------------------")
+
         for epoch in range(start_epoch, end_epoch + 1):
             st = time.time()
             loss, extras, h1_list_all, f1_list_all = self.train_epoch()
@@ -100,9 +147,6 @@ class Trainer_KBQA(object):
                 if eval_h1 > self.best_h1:
                     self.best_h1 = eval_h1
                     self.save_ckpt("h1")
-                if eval_f1 > self.best_f1:
-                    self.best_f1 = eval_f1
-                    self.save_ckpt("f1")
                 # self.reset_time = 0
                 # else:
                 #     self.logger.info('No improvement after one evaluation iter.')
@@ -112,7 +156,6 @@ class Trainer_KBQA(object):
                 #     break
         self.save_ckpt("final")
         self.logger.info('Train Done! Evaluate on testset with saved model')
-        print("End Training------------------")
         if self.model_name != "back":
             self.evaluate_best(self.mode)
 
@@ -176,7 +219,7 @@ class Trainer_KBQA(object):
         model_name = os.path.join(self.args['checkpoint_dir'], "{}-{}.ckpt".format(self.args['experiment_name'],
                                                                                    reason))
         torch.save(checkpoint, model_name)
-        print("Best %s, save model as %s" %(reason, model_name))
+        self.logger.info("Checkpoint {}, save model as {}".format(reason, model_name))
 
     def load_ckpt(self, filename):
         checkpoint = torch.load(filename)
