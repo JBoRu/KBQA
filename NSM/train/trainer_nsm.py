@@ -131,29 +131,22 @@ class Trainer_KBQA(object):
             loss, extras, h1_list_all, f1_list_all = self.train_epoch()
             if self.decay_rate > 0:
                 self.scheduler.step()
-            # if self.mode == "student":
-            #     self.student.update_target()
-            # actor_loss, ent_loss = extras
             self.logger.info("Epoch: {}, loss : {:.4f}, time: {}".format(epoch + 1, loss, time.time() - st))
             self.logger.info("Training h1 : {:.4f}, f1 : {:.4f}".format(np.mean(h1_list_all), np.mean(f1_list_all)))
-            # print("actor : {:.4f}, ent : {:.4f}".format(actor_loss, ent_loss))
             if (epoch + 1) % eval_every == 0 and epoch + 1 > 0:
-                if self.model_name == "back":
-                    eval_f1 = np.mean(f1_list_all)
-                    eval_h1 = np.mean(h1_list_all)
-                else:
-                    eval_f1, eval_h1 = self.evaluate(self.valid_data, self.test_batch_size, mode="teacher")
+                eval_f1, eval_h1 = self.evaluate(self.valid_data, self.test_batch_size, mode="teacher")
                 self.logger.info("EVAL F1: {:.4f}, H1: {:.4f}".format(eval_f1, eval_h1))
                 if eval_h1 > self.best_h1:
                     self.best_h1 = eval_h1
                     self.save_ckpt("h1")
-                # self.reset_time = 0
-                # else:
-                #     self.logger.info('No improvement after one evaluation iter.')
-                #     self.reset_time += 1
-                # if self.reset_time >= 5:
-                #     self.logger.info('No improvement after 5 evaluation. Early Stopping.')
-                #     break
+                    self.reset_time = 0
+                else:
+                    self.reset_time += 1
+                    self.logger.info('No improvement after {} evaluation iter.'.format(str(self.reset_time)))
+
+                if 0 < self.args["early_stop_patience"] < self.reset_time:
+                    self.logger.info('No improvement after {} evaluation. Early Stopping.'.format(self.reset_time))
+                    break
         self.save_ckpt("final")
         self.logger.info('Train Done! Evaluate on testset with saved model')
         if self.model_name != "back":
@@ -164,12 +157,6 @@ class Trainer_KBQA(object):
         self.load_ckpt(filename)
         eval_f1, eval_h1 = self.evaluate(self.test_data, self.test_batch_size, mode="teacher", write_info=False)
         self.logger.info("Best h1 evaluation")
-        self.logger.info("TEST F1: {:.4f}, H1: {:.4f}".format(eval_f1, eval_h1))
-
-        filename = os.path.join(self.args['checkpoint_dir'], "{}-f1.ckpt".format(self.args['experiment_name']))
-        self.load_ckpt(filename)
-        eval_f1, eval_h1 = self.evaluate(self.test_data, self.test_batch_size, mode="teacher", write_info=False)
-        self.logger.info("Best f1 evaluation")
         self.logger.info("TEST F1: {:.4f}, H1: {:.4f}".format(eval_f1, eval_h1))
 
         filename = os.path.join(self.args['checkpoint_dir'], "{}-final.ckpt".format(self.args['experiment_name']))

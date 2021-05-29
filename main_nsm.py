@@ -97,10 +97,11 @@ parser.add_argument('--pretrain', action='store_true')
 parser.add_argument('--debug', action='store_true', default=False)
 parser.add_argument('--tb_record', action='store_true',
                     help="Whether use tensorboard to record training process")
-parser.add_argument('--use_LM_encode_question', action='store_true',
-                    help='use pretrained LM to encode question first, get cls and tokens representation')
-parser.add_argument('--instruction_model', default="lstm", type=str,
-                    help='the method of modeling instruction')
+parser.add_argument('--question_encoder', default="lstm", type=str,
+                    help='the method of encoding question')
+parser.add_argument('--early_stop_patience', default=0, type=int)
+parser.add_argument('--question_encoding_optim', action='store_true',
+                    help='when using lstm encode question, skip the padding token')
 
 args = parser.parse_args()
 args.use_cuda = torch.cuda.is_available()

@@ -1,10 +1,8 @@
 import torch
-import numpy as np
-from torch.autograd import Variable
-import torch.nn.functional as F
-import torch.nn as nn
 from NSM.Model.base_model import BaseModel
-from NSM.Modules.Instruction.seq_instruction import LSTMInstruction,LSTMInstructionWithLMEncodeQuestion
+from NSM.Modules.Instruction.seq_instruction import InstructionWithLSTMEncodeQuestion
+# import NSM.Modules.Instruction.seq_instruction.LSTMInstruction as a
+from NSM.Modules.Instruction.seq_instruction import InstructionWithLMEncodeQuestion
 from NSM.Modules.Reasoning.gnn_reasoning import GNNReasoning
 
 VERY_SMALL_NUMBER = 1e-10
@@ -33,16 +31,17 @@ class GNNModel(BaseModel):
         kge_dim = self.kge_dim
         entity_dim = self.entity_dim
         self.reasoning = GNNReasoning(args, num_entity, num_relation)
-        if self.args['instruction_model'] == "lstm":
-            if self.args['use_LM_encode_question']:
-                self.instruction = LSTMInstructionWithLMEncodeQuestion(args, self.word_embedding, self.num_word)
-            else:
-                self.instruction = LSTMInstruction(args, self.word_embedding, self.num_word)
+        if self.args['question_encoder'] == "lstm":
+            # self.instruction = LSTMInstruction(args, self.word_embedding, self.num_word)
+            self.instruction = InstructionWithLSTMEncodeQuestion(args, self.word_embedding, self.num_word)
+        elif self.args['question_encoder'] == "lm":
+            self.instruction = InstructionWithLMEncodeQuestion(args, self.word_embedding, self.num_word)
+
 
     def init_reason(self, curr_dist, local_entity, kb_adj_mat, q_input, q_str_list):
         # batch_size = local_entity.size(0)
         self.local_entity = local_entity
-        if self.args['use_LM_encode_question']:
+        if self.args['question_encoder'] != 'lstm':
             self.instruction_list, self.attn_list = self.instruction(q_str_list)
         else:
             self.instruction_list, self.attn_list = self.instruction(q_input)

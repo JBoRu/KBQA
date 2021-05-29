@@ -13,6 +13,7 @@ class BaseInstruction(torch.nn.Module):
 
     def __init__(self, args):
         super(BaseInstruction, self).__init__()
+        self.args = args
         self._parse_args(args)
         self.share_module_def()
 

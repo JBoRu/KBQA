@@ -177,7 +177,7 @@ class BaseModel(torch.nn.Module):
             self.relation_kge = None
 
         # initialize text embeddings
-        if self.args['use_LM_encode_question']:
+        if self.args['question_encoder'] != "lstm":
             self.word_embedding = None
         else:
             self.word_embedding = nn.Embedding(num_embeddings=num_word + 1, embedding_dim=word_dim,

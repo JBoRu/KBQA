@@ -1,10 +1,6 @@
 import torch
-import numpy as np
-from torch.autograd import Variable
 import torch.nn.functional as F
 import torch.nn as nn
-import time
-import numpy as np
 from NSM.Modules.Reasoning.base_reasoning import BaseReasoning
 VERY_SMALL_NUMBER = 1e-10
 VERY_NEG_NUMBER = -100000000000
