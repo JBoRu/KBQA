@@ -5,8 +5,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 import time
 from NSM.Modules.Instruction.base_instruction import BaseInstruction
-from transformers import AutoTokenizer
-from transformers import BertModel as PretrainedBert
+from transformers import AutoTokenizer, RobertaTokenizer, BertTokenizer
+from transformers import BertModel, RobertaModel
 VERY_SMALL_NUMBER = 1e-10
 VERY_NEG_NUMBER = -100000000000
 
@@ -106,7 +106,7 @@ class InstructionWithLMEncodeQuestion(BaseInstruction):
         super(InstructionWithLMEncodeQuestion, self).__init__(args)
         self.word_embedding = word_embedding
         self.num_word = num_word
-        self.pretrained_bert_def()
+        self.pretrained_lm_def()
         entity_dim = self.entity_dim
         word_dim = self.word_dim
         self.word_embedding_linear = nn.Linear(in_features=word_dim, out_features=entity_dim)
@@ -115,12 +115,50 @@ class InstructionWithLMEncodeQuestion(BaseInstruction):
         for i in range(self.num_step):
             self.add_module('question_linear' + str(i), nn.Linear(in_features=entity_dim, out_features=entity_dim))
 
-    def pretrained_bert_def(self):
-        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-        self.pretrained_bert = PretrainedBert.from_pretrained('bert-base-uncased')
-        # fix the pretrained bert model
-        for p in self.pretrained_bert.parameters():
-            p.requires_grad = False
+    def pretrained_lm_def(self):
+        if self.args["lm_name"] == "bert":
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+            self.pretrained_model = BertModel.from_pretrained("bert-base-uncased")
+        elif self.args["lm_name"] == "roberta":
+            self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+            self.pretrained_model = RobertaModel.from_pretrained("roberta-base")
+        if self.args["update_last_lm_layer"]:
+            for n, p in self.pretrained_model.named_parameters():
+                if "layer.11" in n:
+                    p.requires_grad = True
+                else:
+                    p.requires_grad = False
+        else:
+            for n, p in self.pretrained_model.named_parameters():
+                p.requires_grad = False
+
+    # def pretrained_bert_def(self):
+    #     self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+    #     self.pretrained_bert = PretrainedBert.from_pretrained('bert-base-uncased')
+    #     # fix the pretrained bert model
+    #     if self.args["update_last_lm_layer"]:
+    #         for n,p in self.pretrained_bert.named_parameters():
+    #             if "layer.11" in n:
+    #                 p.requires_grad = True
+    #             else:
+    #                 p.requires_grad = False
+    #     else:
+    #         for n,p in self.pretrained_bert.named_parameters():
+    #             p.requires_grad = False
+
+    # def pretrained_roberta_def(self):
+    #     self.tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+    #     self.pretrained_bert = PretrainedBert.from_pretrained('bert-base-uncased')
+    #     # fix the pretrained bert model
+    #     if self.args["update_last_lm_layer"]:
+    #         for n,p in self.pretrained_bert.named_parameters():
+    #             if "layer.11" in n:
+    #                 p.requires_grad = True
+    #             else:
+    #                 p.requires_grad = False
+    #     else:
+    #         for n,p in self.pretrained_bert.named_parameters():
+    #             p.requires_grad = False
 
     def encode_question(self, query_str_list):
         batch_size = len(query_str_list)
@@ -135,17 +173,19 @@ class InstructionWithLMEncodeQuestion(BaseInstruction):
         return query_hidden_emb, self.query_node_emb
 
     def encode_question_with_lm(self, query_str_list):
-        encoded_input = self.tokenizer(text=query_str_list, padding=True, return_tensors="pt")
-        sequence_ids = encoded_input["input_ids"].to(self.device)
-        token_type_ids = encoded_input["token_type_ids"].to(self.device)
-        sequence_mask = encoded_input["attention_mask"].to(self.device)
-        outputs = self.pretrained_bert(input_ids=sequence_ids, attention_mask=sequence_mask, token_type_ids=token_type_ids)
-        sep_idx = sequence_mask.sum(dim=-1).long() - 1 # (bs)
+        inputs = self.tokenizer(text=query_str_list, padding=True, return_tensors="pt")
+        inputs = inputs.to(self.device)
+        outputs = self.pretrained_model(**inputs)
+        sequence_mask = inputs["attention_mask"]
+
+        sep_idx = sequence_mask.sum(dim=-1).long() - 1  # (bs)
         bs = len(sep_idx)
         bs_idx = torch.tensor([i for i in range(bs)]).long().to(sep_idx.device)
-        sequence_mask[bs_idx,sep_idx] = 0
+        sequence_mask[bs_idx, sep_idx] = 0
+
         last_hidden_state = outputs.last_hidden_state
         last_hidden_state = self.word_embedding_linear(last_hidden_state)
+
         return sequence_mask, last_hidden_state
 
     def init_reason(self, query_str_list):

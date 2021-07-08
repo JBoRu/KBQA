@@ -60,7 +60,12 @@ class GNNModel(BaseModel):
         relational_ins = self.instruction_list[num_step]
         # attn_weight = self.attn_list[num_step]
         # self.relational_ins = relational_ins
-        self.curr_dist = self.reasoning(self.curr_dist, relational_ins, step=num_step)
+
+        if self.args["reason_with_same_param"]:
+            self.curr_dist = self.reasoning(self.curr_dist, relational_ins, step=0)
+        else:
+            self.curr_dist = self.reasoning(self.curr_dist, relational_ins, step=num_step)
+
         self.dist_history.append(self.curr_dist)
 
     def calc_loss_label(self, curr_dist, teacher_dist, label_valid):
@@ -69,49 +74,53 @@ class GNNModel(BaseModel):
         cur_loss = torch.sum(tp_loss) / curr_dist.size(0)
         return cur_loss
 
-    def train_batch(self, batch, middle_dist, label_valid=None):
-        current_dist, q_input, query_mask, kb_adj_mat, answer_dist, \
-        local_entity, query_entities, true_batch_id = batch
-        self.init_reason(curr_dist=current_dist, local_entity=local_entity,
-                         kb_adj_mat=kb_adj_mat, q_input=q_input)
-        for i in range(self.num_step):
-            self.one_step(num_step=i)
-        # loss, extras = self.calc_loss_basic(answer_dist)
-        pred_dist = self.dist_history[-1]
-        # main_loss = self.get_loss_new(pred_dist, answer_dist)
-        # tp_loss = self.get_loss_kl(pred_dist, answer_dist)
-        # (batch_size, max_local_entity)
-        answer_number = torch.sum(answer_dist, dim=1, keepdim=True)
-        case_valid = (answer_number > 0).float()
-        # filter no answer training case
-        # main_loss = torch.sum(tp_loss * case_valid) / pred_dist.size(0)
-        main_loss = self.calc_loss_label(curr_dist=pred_dist, teacher_dist=answer_dist, label_valid=case_valid)
-        distill_loss = None
-        for i in range(self.num_step - 1):
-            curr_dist = self.dist_history[i + 1]
-            # teacher_dist = middle_dist[i].detach()
-            teacher_dist = middle_dist[i].squeeze(1).detach()
-            if self.filter_label:
-                assert not (label_valid is None)
-                tp_label_loss = self.calc_loss_label(curr_dist=curr_dist,
-                                                     teacher_dist=teacher_dist,
-                                                     label_valid=label_valid)
-            else:
-                # tp_label_loss = self.get_loss_new(curr_dist, teacher_dist)
-                tp_label_loss = self.calc_loss_label(curr_dist=curr_dist,
-                                                     teacher_dist=teacher_dist,
-                                                     label_valid=case_valid)
-            if distill_loss is None:
-                distill_loss = tp_label_loss
-            else:
-                distill_loss += tp_label_loss
-        # pred = torch.max(pred_dist, dim=1)[1]
-        extras = [main_loss.item(), distill_loss.item()]
-        # tp_list = [h1.tolist(), f1.tolist()]
-        loss = main_loss + distill_loss * self.lambda_label
-        h1, f1 = self.get_eval_metric(pred_dist, answer_dist)
-        tp_list = [h1.tolist(), f1.tolist()]
-        return loss, extras, pred_dist, tp_list
+    # def train_batch(self, batch, middle_dist, label_valid=None):
+    #     current_dist, q_input, query_mask, kb_adj_mat, answer_dist, \
+    #     local_entity, query_entities, true_batch_id = batch
+    #     self.init_reason(curr_dist=current_dist, local_entity=local_entity,
+    #                      kb_adj_mat=kb_adj_mat, q_input=q_input)
+    #     if self.args["reason_with_same_param"]:
+    #         for i in range(self.num_step):
+    #             self.one_step(num_step=0)
+    #     else:
+    #         for i in range(self.num_step):
+    #             self.one_step(num_step=i)
+    #     # loss, extras = self.calc_loss_basic(answer_dist)
+    #     pred_dist = self.dist_history[-1]
+    #     # main_loss = self.get_loss_new(pred_dist, answer_dist)
+    #     # tp_loss = self.get_loss_kl(pred_dist, answer_dist)
+    #     # (batch_size, max_local_entity)
+    #     answer_number = torch.sum(answer_dist, dim=1, keepdim=True)
+    #     case_valid = (answer_number > 0).float()
+    #     # filter no answer training case
+    #     # main_loss = torch.sum(tp_loss * case_valid) / pred_dist.size(0)
+    #     main_loss = self.calc_loss_label(curr_dist=pred_dist, teacher_dist=answer_dist, label_valid=case_valid)
+    #     distill_loss = None
+    #     for i in range(self.num_step - 1):
+    #         curr_dist = self.dist_history[i + 1]
+    #         # teacher_dist = middle_dist[i].detach()
+    #         teacher_dist = middle_dist[i].squeeze(1).detach()
+    #         if self.filter_label:
+    #             assert not (label_valid is None)
+    #             tp_label_loss = self.calc_loss_label(curr_dist=curr_dist,
+    #                                                  teacher_dist=teacher_dist,
+    #                                                  label_valid=label_valid)
+    #         else:
+    #             # tp_label_loss = self.get_loss_new(curr_dist, teacher_dist)
+    #             tp_label_loss = self.calc_loss_label(curr_dist=curr_dist,
+    #                                                  teacher_dist=teacher_dist,
+    #                                                  label_valid=case_valid)
+    #         if distill_loss is None:
+    #             distill_loss = tp_label_loss
+    #         else:
+    #             distill_loss += tp_label_loss
+    #     # pred = torch.max(pred_dist, dim=1)[1]
+    #     extras = [main_loss.item(), distill_loss.item()]
+    #     # tp_list = [h1.tolist(), f1.tolist()]
+    #     loss = main_loss + distill_loss * self.lambda_label
+    #     h1, f1 = self.get_eval_metric(pred_dist, answer_dist)
+    #     tp_list = [h1.tolist(), f1.tolist()]
+    #     return loss, extras, pred_dist, tp_list
 
     def forward(self, batch, training=False):
         current_dist, q_input, query_mask, kb_adj_mat, answer_dist, \

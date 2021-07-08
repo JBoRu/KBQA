@@ -9,8 +9,8 @@ from NSM.data.basic_dataset import BasicDataLoader
 
 
 class SingleDataLoader(BasicDataLoader):
-    def __init__(self, config, word2id, relation2id, entity2id, logger, data_type="train"):
-        super(SingleDataLoader, self).__init__(config, word2id, relation2id, entity2id, logger, data_type)
+    def __init__(self, config, word2id, relation2id, entity2id, logger, data_type="train", question_type=None):
+        super(SingleDataLoader, self).__init__(config, word2id, relation2id, entity2id, logger, data_type, question_type)
         self.use_label = config['use_label']
         self.label_f1 = config['label_f1']
         if data_type == "train" and self.use_label:

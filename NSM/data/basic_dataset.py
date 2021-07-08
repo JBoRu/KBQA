@@ -17,15 +17,33 @@ def load_dict(filename):
 
 
 class BasicDataLoader(object):
-    def __init__(self, config, word2id, relation2id, entity2id, logger, data_type="train"):
+    def __init__(self, config, word2id, relation2id, entity2id, logger, data_type="train", question_type=None):
         self.logger = logger
+        self.question_type = question_type
         self._parse_args(config, word2id, relation2id, entity2id)
         self._load_file(config, data_type)
         self._load_data()
 
     def _load_file(self, config, data_type="train"):
-        data_file = config['data_folder'] + data_type + "_simple.json"
-        dep_file = config['data_folder'] + data_type + ".dep"
+        if config["filter"]:
+            if data_type == "train" and config["data_split"] > 0:
+                data_file = config['data_folder'] + data_type + "_simple.json.filter" + str(config["data_split"])
+                dep_file = config['data_folder'] + data_type + ".dep" + str(config["data_split"])
+            else:
+                data_file = config['data_folder'] + data_type + "_simple.json.filter"
+                dep_file = config['data_folder'] + data_type + ".dep"
+        else:
+            if data_type == "train" and config["data_split"] > 0:
+                data_file = config['data_folder'] + data_type + "_simple.json" + str(config["data_split"])
+                dep_file = config['data_folder'] + data_type + ".dep" + str(config["data_split"])
+            else:
+                data_file = config['data_folder'] + data_type + "_simple.json"
+                dep_file = config['data_folder'] + data_type + ".dep"
+
+        if self.question_type is not None:
+            data_file = data_file + "_" + self.question_type
+            dep_file = dep_file + "_" + self.question_type
+
         self.logger.info('loading data from {}'.format(data_file))
         self.data = []
         self.dep = []
@@ -41,7 +59,7 @@ class BasicDataLoader(object):
                 self.data.append(line)
                 self.max_facts = max(self.max_facts, 2 * len(line['subgraph']['tuples']))
                 if config["debug"]:
-                    if index > 1000:
+                    if index > 100:
                         break
         self.logger.info("skip: "+str(skip_index))
         index = 0
@@ -53,7 +71,7 @@ class BasicDataLoader(object):
                 line = json.loads(line)
                 self.dep.append(line)
                 if config["debug"]:
-                    if index > 1000:
+                    if index > 100:
                         break
         self.logger.info('max_facts: '+str(self.max_facts))
         self.num_data = len(self.data)

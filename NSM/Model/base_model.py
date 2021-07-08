@@ -51,8 +51,8 @@ class BaseModel(torch.nn.Module):
         self.num_entity = num_entity
         self.num_word = num_word
         self._parse_args(args)
-        self.embedding_def()
-        self.share_module_def()
+        # self.embedding_def()
+        # self.share_module_def()
         self.model_name = args['model_name'].lower()
         print("Entity: {}, Relation: {}, Word: {}".format(num_entity, num_relation, num_word))
 
@@ -102,10 +102,13 @@ class BaseModel(torch.nn.Module):
         else:
             self.entity_linear = nn.Linear(in_features=kg_dim, out_features=entity_dim)
 
+        rel_in_f = int(self.relation_embedding.weight.size()[1])
         if self.has_relation_kge:
-            self.relation_linear = nn.Linear(in_features=2 * kg_dim + kge_dim, out_features=entity_dim)
-        else:
-            self.relation_linear = nn.Linear(in_features=2 * kg_dim, out_features=entity_dim)
+            rel_in_f += kge_dim
+            # self.relation_linear = nn.Linear(in_features=2 * kg_dim + kge_dim, out_features=entity_dim)
+        # else:
+            # self.relation_linear = nn.Linear(in_features=2 * kg_dim, out_features=entity_dim)
+        self.relation_linear = nn.Linear(in_features=rel_in_f, out_features=entity_dim)
 
         # dropout
         self.lstm_drop = nn.Dropout(p=self.lstm_dropout)
@@ -164,10 +167,20 @@ class BaseModel(torch.nn.Module):
                 self.entity_kge = None
 
         # initialize relation embedding
+        # if self.args["use_bert_encode_relation"]:
+        #     self.relation_embedding = nn.Embedding(num_embeddings=num_relation, embedding_dim=word_dim)
+        # else:
+        #     self.relation_embedding = nn.Embedding(num_embeddings=num_relation, embedding_dim=2 * kg_dim)
         self.relation_embedding = nn.Embedding(num_embeddings=num_relation, embedding_dim=2 * kg_dim)
+
         if self.relation_emb_file is not None:
             np_tensor = self.load_relation_file(self.relation_emb_file)
             self.relation_embedding.weight = nn.Parameter(torch.from_numpy(np_tensor).type('torch.FloatTensor'))
+            if self.args["fix_relation_embedding"]:
+                self.relation_embedding.weight.requires_grad = False
+            else:
+                self.relation_embedding.weight.requires_grad = True
+
         if self.relation_kge_file is not None:
             self.has_relation_kge = True
             self.relation_kge = nn.Embedding(num_embeddings=num_relation, embedding_dim=kge_dim)
@@ -175,6 +188,21 @@ class BaseModel(torch.nn.Module):
             self.relation_kge.weight = nn.Parameter(torch.from_numpy(np_tensor).type('torch.FloatTensor'))
         else:
             self.relation_kge = None
+
+        if self.args["add_new_relation_embedding"]:
+            self.has_relation_kge = True
+            self.relation_kge = nn.Embedding(num_embeddings=num_relation, embedding_dim=kge_dim)
+            self.relation_kge.weight = self.relation_embedding.weight
+            if self.args["fix_relation_embedding"]:
+                self.relation_kge.weight.requires_grad = False
+            else:
+                self.relation_kge.weight.requires_grad = True
+
+            emb_dim = self.relation_kge.weight.size()[1]
+            num_rel = self.relation_kge.weight.size()[0]
+            assert num_relation == num_rel
+            self.relation_embedding = nn.Embedding(num_embeddings=num_relation, embedding_dim=emb_dim)
+            self.relation_embedding.weight.requires_grad = True
 
         # initialize text embeddings
         if self.args['question_encoder'] != "lstm":
@@ -190,7 +218,7 @@ class BaseModel(torch.nn.Module):
                 self.word_embedding.weight.requires_grad = False
 
     def load_relation_file(self, filename):
-        half_tensor = np.load(filename)
+        half_tensor = np.load(filename) # (num_rel, hid_dim)
         num_pad = 0
         if self.use_self_loop:
             num_pad = 1
@@ -198,7 +226,7 @@ class BaseModel(torch.nn.Module):
             load_tensor = np.concatenate([half_tensor, half_tensor])
         else:
             load_tensor = half_tensor
-        return np.pad(load_tensor, ((0, num_pad), (0, 0)), 'constant')
+        return np.pad(load_tensor, ((0, num_pad), (0, 0)), 'constant') # (num_rel+-1, hid_dim)
 
     def get_rel_feature(self):
         rel_features = self.relation_embedding.weight

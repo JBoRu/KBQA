@@ -62,6 +62,7 @@ parser.add_argument('--load_experiment', default=None, type=str)
 parser.add_argument('--load_ckpt_file', default=None, type=str)
 parser.add_argument('--eps', default=0.05, type=float) # threshold for f1
 
+
 # RL options
 parser.add_argument('--filter_sub', action='store_true')
 parser.add_argument('--encode_type', action='store_true')
@@ -93,7 +94,6 @@ parser.add_argument('--optim', default='Adam', type=str)
 parser.add_argument('--initialize_method', default="normal", type=str,
                     help="the initialize method which can be 'normal', 'xavier_uniform'")
 parser.add_argument('--weight_decay', default=0.01, type=float)
-parser.add_argument('--pretrain', action='store_true')
 parser.add_argument('--debug', action='store_true', default=False)
 parser.add_argument('--tb_record', action='store_true',
                     help="Whether use tensorboard to record training process")
@@ -102,6 +102,49 @@ parser.add_argument('--question_encoder', default="lstm", type=str,
 parser.add_argument('--early_stop_patience', default=0, type=int)
 parser.add_argument('--question_encoding_optim', action='store_true',
                     help='when using lstm encode question, skip the padding token')
+parser.add_argument('--update_last_lm_layer', action='store_true',
+                    help='update the last layer of pretrained lm')
+parser.add_argument('--fix_relation_embedding', action='store_true',
+                    help='fix the relation embedding load from pretrained file')
+parser.add_argument('--pretrain', action='store_true',
+                    help='whether pretain on large datasets')
+parser.add_argument('--reason_with_same_param', action='store_true',
+                    help='whether use one layer to reason')
+parser.add_argument('--add_new_relation_embedding', action='store_true',
+                    help='add a new learnable relation embedding to each datasets itself')
+parser.add_argument('--finetune_whole', action='store_true',
+                    help='finetune the whole params without bert encode relations')
+parser.add_argument('--ckpt_4_embedding', type=str,
+                    help='load embedding from ckpt')
+parser.add_argument('--ckpt_4_pretrain', type=str,
+                    help='finetune params from pretrained model')
+parser.add_argument('--lm_name', default="bert", type=str,
+                    help='the pretrained model name')
+parser.add_argument('--finetune_reasoning', action='store_true',
+                    help='finetune pretrained reasoning params and initialized other params')
+parser.add_argument('--finetune_instruction', action='store_true',
+                    help='finetune pretrained instruction params and initialized other params')
+parser.add_argument('--finetune_gnn', action='store_true',
+                    help='finetune the gnn parameters of instruction module and initialized other params')
+parser.add_argument('--finetune_matching', action='store_true',
+                    help='finetune the matching parameters of instruction module and initialized other params')
+parser.add_argument('--finetune_scoring', action='store_true',
+                    help='finetune the scoring parameters and initialized other params')
+parser.add_argument('--continue_training', action='store_true',
+                    help='load checkpoint model to continue train')
+parser.add_argument('--data_split', default=0, type=int)
+parser.add_argument('--merge_lr', action='store_true',
+                    help='use different lr')
+parser.add_argument('--fintune_param_lr', default=0, type=float)
+parser.add_argument('--scratch_param_lr', default=0, type=float)
+parser.add_argument('--min_lr', default=0, type=float)
+parser.add_argument('--filter', action='store_true',
+                    help='use filter data')
+parser.add_argument('--finetune_only_reasoning', action='store_true',
+                    help='only finetune reasoning module')
+parser.add_argument('--eval_different_type', action='store_true',
+                    help='only finetune reasoning module')
+
 
 args = parser.parse_args()
 args.use_cuda = torch.cuda.is_available()
@@ -130,7 +173,7 @@ def main():
         trainer.pretrain(trainer.start_epoch, args.num_epoch - 1, tensorboard)
     elif args.finetune:
         logger.info("Start finetune!")
-        trainer.finetune(trainer.start_epoch, args.num_epoch - 1, tensorboard)
+        trainer.fintunetrain(trainer.start_epoch, args.num_epoch - 1, tensorboard)
     elif not args.is_eval:
         logger.info("Start train!")
         trainer.train(trainer.start_epoch, args.num_epoch - 1, tensorboard)

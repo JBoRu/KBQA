@@ -45,25 +45,6 @@ class NsmAgent(nn.Module):
         batch = self.deal_input(batch)
         return self.model(batch, training=training)
 
-    # def label_data(self, batch):
-    #     batch = self.deal_input(batch)
-    #     # middle_dist = self.model.label_data(batch)
-    #     middle_dist = []
-    #     self.model(batch, training=False)
-    #     forward_history = self.model.dist_history
-    #     for i in range(self.num_step - 1):
-    #         middle_dist.append(forward_history[i + 1])
-    #     current_dist, q_input, query_mask, kb_adj_mat, answer_dist, \
-    #     local_entity, query_entities, true_batch_id = batch
-    #     if self.model_name == "back":
-    #         pred_dist = self.model.dist_history[0]
-    #         label_valid = self.model.get_label_valid(pred_dist, query_entities, label_f1=self.label_f1)
-    #     else:
-    #         pred_dist = self.model.dist_history[-1]
-    #         label_valid = self.model.get_label_valid(pred_dist, answer_dist, label_f1=self.label_f1)
-    #     # label_valid = None
-    #     return middle_dist, label_valid
-
     def train_batch(self, batch, middle_dist, label_valid=None):
         batch = self.deal_input(batch)
         return self.model.train_batch(batch, middle_dist, label_valid)
